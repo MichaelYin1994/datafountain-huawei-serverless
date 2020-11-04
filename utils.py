@@ -41,6 +41,15 @@ def timefn(fcn):
     return measure_time
 
 
+def custom_metric(y_true, y_pred):
+    y_sub = y_true - y_pred
+    y_max = np.max([y_true, y_pred], axis=0)
+
+    y_res = np.zeros(y_sub.shape[0])
+    y_res[y_max != 0] = y_sub[y_max != 0] / y_max[y_max != 0]
+    return np.abs(y_res)
+
+
 def plot_metric(history=None, metric_type="acc", **kwargs):
     """Plot the training curve of Tensorflow NN"""
     train_metric = history.history[metric_type]

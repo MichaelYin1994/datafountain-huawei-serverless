@@ -1,6 +1,11 @@
-models/*
+w2v_pretraining_models/*
+baseline/*
 data/*
 cached_data/*
+submissions/*
+submission_oof/*
+bert_pretraining_models/*
+__pycache__/*
 
 *.csv
 *.tsv
