@@ -193,11 +193,11 @@ def build_model(verbose=False, is_compile=True, **kwargs):
 if __name__ == "__main__":
     # Pre-setting global parameters:
     # ----------------------------
-    N_FOLDS = 2
-    N_EPOCHS = 4
+    N_FOLDS = 5
+    N_EPOCHS = 1500
     BATCH_SIZE = 32768
-    RANDOM_SEED = 2020
-    EARLY_STOP_ROUNDS = 50
+    RANDOM_SEED = 2021
+    EARLY_STOP_ROUNDS = 200
 
     # Loading all the data
     # ----------------------------
@@ -253,7 +253,7 @@ if __name__ == "__main__":
         test_feat_vals = X_sc.transform(test_feat_vals)
 
         # Split folds
-        folds = KFold(n_splits=N_FOLDS, shuffle=True)
+        folds = KFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_SEED)
         y_pred_tmp = np.zeros((len(test_feat_vals), 2))
         oof_pred_tmp = np.zeros((len(train_feat_vals), 2))
 
