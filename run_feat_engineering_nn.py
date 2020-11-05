@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Sun Oct 18 23:39:18 2020
+Created on Thu Nov  5 20:46:05 2020
 
 @author: zhuoyin94
 """
@@ -21,6 +21,8 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from utils import LoadSave, custom_metric
 from sklearn.model_selection import StratifiedKFold, KFold
 import lightgbm as lgb
+
+from utils import LoadSave
 
 np.random.seed(2021)
 warnings.filterwarnings('ignore')
@@ -142,8 +144,6 @@ if __name__ == "__main__":
                     "FAILED_JOB_NUMS", "DISK_USAGE"]
     feat_df = total_df[key_cols].copy()
 
-    # numeric_cols = ["CPU_USAGE", "LAUNCHING_JOB_NUMS", "SUCCEED_JOB_NUMS", "CANCELLED_JOB_NUMS"]
-    # cat_cols = ["CU", "QUEUE_TYPE"]
 
     # Feature engineering
     # ----------------------------
@@ -158,9 +158,7 @@ if __name__ == "__main__":
     for feat_name in cat_cols:
         if feat_name == "CU":
             continue
-        tmp_df = pd.get_dummies(total_df[feat_name])
-        tmp_df.columns = [feat_name + "_(" + str(item) + ")" for item in tmp_df.columns]
-        feat_df = pd.concat([feat_df, tmp_df], axis=1)
+        feat_df[feat_name] = feat_df[feat_name].astype("category")
     feat_df = pd.concat([feat_df, total_df[["CU"]]], axis=1)
 
 
@@ -191,107 +189,9 @@ if __name__ == "__main__":
                             axis=1, inplace=True)
 
 
-    # Model training
+    # Save feat engineering results
     # ----------------------------
-    train_feat_df = feat_df[feat_df["ID"].isnull()].reset_index(drop=True)
-    test_feat_df = feat_df[feat_df["ID"].notnull()].reset_index(drop=True)
-    test_feat_df = test_feat_df.groupby(["QUEUE_ID", "ID"]).apply(lambda x: x.iloc[-1]).reset_index(drop=True)
-
-    oof_pred_df = pd.DataFrame(None)
-    test_pred_df = test_feat_df[["ID"]].copy()
-    total_scores_df = np.zeros((10, 4))
-
-    target_cols = list(target_df.drop(["QUEUE_ID", "DOTTING_TIME"], axis=1).columns)
-    for ind, target_name in enumerate(target_cols):
-        target_vals = target_df[target_name].values
-        train_feat_vals = train_feat_df.drop(key_cols, axis=1).values
-        test_feat_vals = test_feat_df.drop(key_cols, axis=1).values
-
-        train_feat_vals = train_feat_vals[~np.isnan(target_vals)]
-        target_vals = target_vals[~np.isnan(target_vals)]
-
-        folds = KFold(n_splits=N_FOLDS, shuffle=True)
-        y_pred_tmp = np.zeros((len(test_feat_vals), ))
-        oof_pred_tmp = np.zeros((len(train_feat_vals), ))
-
-        print("\n[INFO] Target Name: {}".format(target_name))
-        print("[INFO] #training samples: {}, #testing samples: {}, #feats: {}".format(
-            len(train_feat_vals), len(test_feat_vals), train_feat_vals.shape[1]))
-        print("==================================")
-        for fold, (tra_id, val_id) in enumerate(folds.split(train_feat_vals,
-                                                            target_vals)):
-            d_train, d_valid = train_feat_vals[tra_id], train_feat_vals[val_id]
-            t_train, t_valid = target_vals[tra_id], target_vals[val_id]
-
-            d_train = lgb.Dataset(d_train,
-                                  label=t_train)
-            d_valid = lgb.Dataset(d_valid, 
-                                  label=t_valid,
-                                  reference=d_train)
-            reg = lgb.train(lgb_params,
-                            d_train, valid_sets=d_valid,
-                            early_stopping_rounds=300,
-                            verbose_eval=False)
-
-            valid_pred = reg.predict(train_feat_vals[val_id],
-                                      num_iteration=reg.best_iteration)
-            oof_pred_tmp[val_id] = valid_pred
-            y_pred_tmp += reg.predict(test_feat_vals, num_iteration=reg.best_iteration)/N_FOLDS
-
-            valid_mse = mean_squared_error(
-                t_valid.reshape((-1, 1)), valid_pred.reshape((-1, 1)))
-            valid_mae = mean_absolute_error(
-                t_valid.reshape((-1, 1)), valid_pred.reshape((-1, 1)))
-            valid_r2 = r2_score(
-                t_valid.reshape((-1, 1)), valid_pred.reshape((-1, 1)))
-
-            print("-- fold {}({}): valid MSE: {:.5f}, MAE: {:.5f}, R2: {:.5f}".format(
-                fold, N_FOLDS, valid_mse, valid_mae, valid_r2))
-            lgb_params["random_state"] += 2099
-
-        # Save current round prediction results
-        total_scores_df[ind, 0] = mean_squared_error(target_vals.reshape((-1, 1)),
-                                                      oof_pred_tmp.reshape((-1, 1)))
-        total_scores_df[ind, 1] = mean_absolute_error(target_vals.reshape((-1, 1)),
-                                                      oof_pred_tmp.reshape((-1, 1)))
-        total_scores_df[ind, 2] = r2_score(target_vals.reshape((-1, 1)),
-                                            oof_pred_tmp.reshape((-1, 1)))
-        total_scores_df[ind, 3] = np.mean(custom_metric(target_vals, np.clip(oof_pred_tmp,
-                                                                              a_min=0,
-                                                                              a_max=np.max(oof_pred_tmp))))
-        test_pred_df[target_name] = y_pred_tmp
-
-        print("-- Total: total valid MSE: {:.5f}, MAE: {:.5f}, R2: {:.5f}".format(
-                total_scores_df[ind, 0], total_scores_df[ind, 1], total_scores_df[ind, 2]))
-        print("==================================")
-
-    # Preparing the evaluation dataframe
-    total_scores = pd.DataFrame(
-        total_scores_df, columns=["oof_mse", "oof_mae", "oof_r2", "oof_custom"])
-    total_scores["target_name"] = list(test_pred_df.drop(["ID"], axis=1).columns)
-
-
-    # Preparing submissions
-    # ----------------------------
-    custom_score = 0
-    for i in range(1, 5+1):
-        custom_score += total_scores[total_scores["target_name"] == "CPU_USAGE_{}".format(i)]["oof_mae"].values[0] / 100 * 0.9
-        custom_score += total_scores[total_scores["target_name"] == "LAUNCHING_JOB_NUMS_{}".format(i)]["oof_custom"].values[0] * 0.1
-    custom_score = 1 - custom_score
-
-    sub_ind = len(os.listdir(".//submissions//")) + 1
-    sub_name = "{}_lgb_{}_cpu_mae_{:.3f}_jobs_mae_{:.3f}_scores_{:.3f}".format(
-        sub_ind,
-        N_FOLDS,
-        np.mean(total_scores["oof_mae"][total_scores["target_name"].apply(lambda x: "CPU" in x)].values),
-        np.mean(total_scores["oof_mae"][total_scores["target_name"].apply(lambda x: "JOB" in x)].values),
-        custom_score)
-
-    submission = pd.read_csv(".//data//submit_example.csv")
-    submission_to_save = test_pred_df.sort_values(by=["ID"]).copy()
-    submission_to_save.reset_index(drop=True, inplace=True)
-    submission_to_save = np.round(submission_to_save).astype(int)
-    submission_to_save = submission_to_save.clip(0, )
-
-    submission_to_save = submission_to_save[submission.columns]
-    submission_to_save.to_csv(".//submissions//{}.csv".format(sub_name), encoding="utf-8", index=False)
+    file_processor = LoadSave()
+    total_results = [feat_df, target_df]
+    file_processor.save_data(path=".//cached_data//{}.pkl".format("nn_dense_feat"),
+                             data=total_results)
