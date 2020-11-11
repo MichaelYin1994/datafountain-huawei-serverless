@@ -6,10 +6,8 @@ Created on Sun Oct 18 23:39:18 2020
 @author: zhuoyin94
 """
 
-import os
-import gc
+import os, gc, warnings
 from datetime import datetime
-import warnings
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
@@ -61,10 +59,8 @@ def njit_scan(df_index=None,
     return feat_vals_to_compute
 
 
-def compute_lagging_statistical_feats(df=None,
-                                      feat_col_name=None,
-                                      time_col_name="DOTTING_TIME",
-                                      operation_list=None,
+def compute_lagging_statistical_feats(df=None, feat_col_name=None,
+                                      time_col_name="DOTTING_TIME", operation_list=None,
                                       lagging_mins=20):
     """Compute the lagging statistica features based on a specific time_range(lagging_mins)(Maximum == 20)."""
     if feat_col_name is None:
@@ -109,16 +105,18 @@ def trend(n):
 
 
 if __name__ == "__main__":
-    # Pre_setting global parameters:
+    # Pre-setting global parameters:
     # ----------------------------
     N_FOLDS = 5
+    RANDOM_SEED = 2021
+    EARLY_STOP_ROUNDS = 100
     lgb_params = {"boosting_type": "gbdt",
                   "objective": "regression",
-                  "metric": {"l2"},
-                  "n_estimators": 5000,
+                  "metric": {"l1"},
+                  "n_estimators": 2000,
                   "num_leaves": 31,
                   "max_depth": 4,
-                  "learning_rate": 0.01,
+                  "learning_rate": 0.07,
                   "colsample_bytree": 0.95,               # feature_fraction=0.9
                   "subsample": 0.95,                      # bagging_fraction=0.8
                   "subsample_freq": 1,                    # bagging_freq=1
@@ -132,70 +130,18 @@ if __name__ == "__main__":
     # ----------------------------
     print("\n")
     total_df = load_pkl("total_df.pkl")
+    feat_df, target_df = load_pkl("lgb_dense_feat.pkl")
     train_df = total_df[total_df["ID"].isnull()].reset_index(drop=True)
     test_df = total_df[total_df["ID"].notnull()].reset_index(drop=True)
-
     key_cols = ["ID", "QUEUE_ID", "DOTTING_TIME"]
-    cat_cols = ["STATUS", "QUEUE_TYPE", "PLATFORM", "RESOURCE_TYPE", "CU"]
-    numeric_cols = ["CPU_USAGE", "MEM_USAGE", "LAUNCHING_JOB_NUMS",
-                    "RUNNING_JOB_NUMS", "SUCCEED_JOB_NUMS", "CANCELLED_JOB_NUMS",
-                    "FAILED_JOB_NUMS", "DISK_USAGE"]
-    feat_df = total_df[key_cols].copy()
-
-    # numeric_cols = ["CPU_USAGE", "LAUNCHING_JOB_NUMS", "SUCCEED_JOB_NUMS", "CANCELLED_JOB_NUMS"]
-    # cat_cols = ["CU", "QUEUE_TYPE"]
-
-    # Feature engineering
-    # ----------------------------
-    for feat_name in tqdm(numeric_cols):
-        tmp_df = compute_lagging_statistical_feats(
-            df=total_df[["DOTTING_TIME"]+[feat_name]].copy(),
-            feat_col_name=feat_name,
-            operation_list=[np.mean, np.ptp, np.std, np.sum, np.min, np.max, nearby(1), nearby(2)],
-            lagging_mins=20)
-        feat_df = pd.concat([feat_df, tmp_df.drop(["DOTTING_TIME"], axis=1)], axis=1)
-
-    for feat_name in cat_cols:
-        if feat_name == "CU":
-            continue
-        tmp_df = pd.get_dummies(total_df[feat_name])
-        tmp_df.columns = [feat_name + "_(" + str(item) + ")" for item in tmp_df.columns]
-        feat_df = pd.concat([feat_df, tmp_df], axis=1)
-    feat_df = pd.concat([feat_df, total_df[["CU"]]], axis=1)
-
-
-    # Create targets dataframe
-    # ----------------------------
-    target_df = train_df[["QUEUE_ID", "DOTTING_TIME"]].copy()
-    target_feat_cols = ["CPU_USAGE", "LAUNCHING_JOB_NUMS"]
-    forward_steps_list = [1, 2, 3, 4, 5]
-
-    for feat_name in target_feat_cols:
-        for step in forward_steps_list:
-            tol_time_diff = step * 5 * 60 * 1000 + 4 * 60 * 1000
-            target_feat_name = feat_name + "_" + str(step)
-            tmp_df = train_df[["DOTTING_TIME", "QUEUE_ID", feat_name]].copy()
-            tmp_df = tmp_df.shift(periods=-step, axis=0).reset_index(drop=True)
-
-            tmp_df.rename({"DOTTING_TIME": "DOTTING_TIME_SHIFT",
-                            "QUEUE_ID": "QUEUE_ID_SHIFT",
-                            feat_name: target_feat_name}, axis=1, inplace=True)
-            target_df = pd.concat([target_df, tmp_df], axis=1)
-
-            # Exclude invalid target values
-            target_df[target_feat_name][target_df["QUEUE_ID"] != target_df["QUEUE_ID_SHIFT"]]= np.nan
-            target_df[target_feat_name][abs(target_df["DOTTING_TIME"] - target_df["DOTTING_TIME_SHIFT"]) > tol_time_diff] = np.nan
-
-            # Drop tmp columns
-            target_df.drop(["DOTTING_TIME_SHIFT", "QUEUE_ID_SHIFT"],
-                            axis=1, inplace=True)
 
 
     # Model training
     # ----------------------------
     train_feat_df = feat_df[feat_df["ID"].isnull()].reset_index(drop=True)
     test_feat_df = feat_df[feat_df["ID"].notnull()].reset_index(drop=True)
-    test_feat_df = test_feat_df.groupby(["QUEUE_ID", "ID"]).apply(lambda x: x.iloc[-1]).reset_index(drop=True)
+    test_feat_df = test_feat_df.groupby(["QUEUE_ID", "ID"]).apply(
+        lambda x: x.iloc[-1]).reset_index(drop=True)
 
     oof_pred_df = pd.DataFrame(None)
     test_pred_df = test_feat_df[["ID"]].copy()
@@ -210,7 +156,7 @@ if __name__ == "__main__":
         train_feat_vals = train_feat_vals[~np.isnan(target_vals)]
         target_vals = target_vals[~np.isnan(target_vals)]
 
-        folds = KFold(n_splits=N_FOLDS, shuffle=True)
+        folds = KFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_SEED)
         y_pred_tmp = np.zeros((len(test_feat_vals), ))
         oof_pred_tmp = np.zeros((len(train_feat_vals), ))
 
@@ -230,7 +176,7 @@ if __name__ == "__main__":
                                   reference=d_train)
             reg = lgb.train(lgb_params,
                             d_train, valid_sets=d_valid,
-                            early_stopping_rounds=300,
+                            early_stopping_rounds=EARLY_STOP_ROUNDS,
                             verbose_eval=False)
 
             valid_pred = reg.predict(train_feat_vals[val_id],
@@ -256,9 +202,9 @@ if __name__ == "__main__":
                                                       oof_pred_tmp.reshape((-1, 1)))
         total_scores_df[ind, 2] = r2_score(target_vals.reshape((-1, 1)),
                                             oof_pred_tmp.reshape((-1, 1)))
-        total_scores_df[ind, 3] = np.mean(custom_metric(target_vals, np.clip(oof_pred_tmp,
-                                                                              a_min=0,
-                                                                              a_max=np.max(oof_pred_tmp))))
+        total_scores_df[ind, 3] = np.mean(custom_metric(target_vals, np.clip(oof_pred_tmp, 
+                                                                             a_min=0,
+                                                                             a_max=np.max(oof_pred_tmp))))
         test_pred_df[target_name] = y_pred_tmp
 
         print("-- Total: total valid MSE: {:.5f}, MAE: {:.5f}, R2: {:.5f}".format(
@@ -269,7 +215,6 @@ if __name__ == "__main__":
     total_scores = pd.DataFrame(
         total_scores_df, columns=["oof_mse", "oof_mae", "oof_r2", "oof_custom"])
     total_scores["target_name"] = list(test_pred_df.drop(["ID"], axis=1).columns)
-
 
     # Preparing submissions
     # ----------------------------

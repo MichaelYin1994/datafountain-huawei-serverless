@@ -254,63 +254,6 @@ class ReduceMemoryUsage():
         return self._data_table
 
 
-def pred_to_submission(y_valid=None, y_pred=None, score=None, save_oof=False,
-                       sub_str_field="", best_threshold=0.5):
-    """Save the oof prediction results to the local path."""
-    sub_ind = len(os.listdir(".//submissions//")) + 1
-    file_name = "{}_{}_tf1_{}_tacc_{}_vf1_{}_vacc_{}".format(
-        sub_ind, sub_str_field,
-        str(round(score["train_f1"].mean(), 4)).split(".")[1],
-        str(round(score["train_acc"].mean(), 4)).split(".")[1],
-        str(round(score["valid_f1"].mean(), 4)).split(".")[1],
-        str(round(score["valid_acc"].mean(), 4)).split(".")[1])
-
-    # Saving the submissions.
-    submission = pd.DataFrame(None)
-    submission["id"], submission["reply_id"] = y_pred["id"], y_pred["reply_id"]
-    submission["target"] = np.where(y_pred.drop(["id", "reply_id"], axis=1).values[:, 1] > best_threshold,
-                                    1, 0)
-    submission.to_csv(".//submissions//{}.tsv".format(file_name),
-                      header=False, index=False, encoding="utf-8",
-                      sep="\t")
-
-    # Submission stat
-    print("\n---------------------")
-    print("[SUB] Saving {} to the local.".format(file_name))
-    pos_precent = len(submission.query("target == 1"))/len(submission) * 100
-    neg_precent = len(submission.query("target == 0"))/len(submission) * 100
-    print("[SUB] Submission match precent(1): {:.5f}%, not match precent(0): {:.5f}%.".format(
-        pos_precent, neg_precent))
-    print("---------------------")
-
-    # Saving the oof scores.
-    if save_oof:
-        y_valid.to_csv(".//submission_oof//{}_valid.csv".format(file_name),
-                       index=False, encoding="utf-8")
-        y_pred.to_csv(".//submission_oof//{}_pred.csv".format(file_name),
-                      index=False, encoding="utf-8")
-
-    # Saving the oof scores.
-    if save_oof:
-        y_valid.to_csv(".//submission_oof//{}_valid.csv".format(file_name),
-                       index=False, encoding="utf-8")
-        y_pred.to_csv(".//submission_oof//{}_pred.csv".format(file_name),
-                      index=False, encoding="utf-8")
-
-
-def search_best_thresold_f1(y_pred_proba, y_true):
-    """Searching for the best f1 thresold."""
-    best_f1, best_threshold = 0, 0
-    for threshold in range(20, 90):
-        thresold = threshold / 100
-        y_pred_label = np.where(y_pred_proba > thresold, 1, 0)
-        score_tmp = f1_score(y_true.reshape(-1, 1), y_pred_label.reshape(-1, 1))
-        if score_tmp > best_f1:
-            best_f1 = score_tmp
-            best_threshold = threshold
-    return best_f1, best_threshold/100
-
-
 @jit
 def compute_longest_common_subsequence(seq_x=None, seq_y=None, max_pos_diff=3):
     """Calculate LCSS."""

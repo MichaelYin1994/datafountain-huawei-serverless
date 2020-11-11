@@ -186,7 +186,7 @@ def build_model(verbose=False, is_compile=True, **kwargs):
         model.summary()
     if is_compile:
         model.compile(loss="mean_absolute_error",
-                      optimizer=Adam(0.01))
+                      optimizer=Adam(0.02))
     return model
 
 
@@ -194,10 +194,10 @@ if __name__ == "__main__":
     # Pre-setting global parameters:
     # ----------------------------
     N_FOLDS = 5
-    N_EPOCHS = 1500
+    N_EPOCHS = 2000
     BATCH_SIZE = 32768
     RANDOM_SEED = 2021
-    EARLY_STOP_ROUNDS = 200
+    EARLY_STOP_ROUNDS = 50
 
     # Loading all the data
     # ----------------------------
@@ -206,13 +206,7 @@ if __name__ == "__main__":
     feat_df, target_df = load_pkl("nn_dense_feat.pkl")
     train_df = total_df[total_df["ID"].isnull()].reset_index(drop=True)
     test_df = total_df[total_df["ID"].notnull()].reset_index(drop=True)
-
     key_cols = ["ID", "QUEUE_ID", "DOTTING_TIME"]
-    cat_cols = ["STATUS", "QUEUE_TYPE", "PLATFORM", "RESOURCE_TYPE", "CU"]
-    numeric_cols = ["CPU_USAGE", "MEM_USAGE", "LAUNCHING_JOB_NUMS",
-                    "RUNNING_JOB_NUMS", "SUCCEED_JOB_NUMS", "CANCELLED_JOB_NUMS",
-                    "FAILED_JOB_NUMS", "DISK_USAGE"]
-
 
     # Model training
     # ----------------------------
